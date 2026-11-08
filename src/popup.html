@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Antigravity Tab Group Guard</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <img src="../icons/icon48.png" alt="Antigravity" class="logo" width="28" height="28" />
+        <div class="title-wrap">
+          <h1>Antigravity Guard</h1>
+          <span class="subtitle">Isolated Tab Group Controller</span>
+        </div>
+        <span id="statusPill" class="pill pill-idle">Idle</span>
+      </header>
+
+      <section class="metrics">
+        <div class="metric-card">
+          <span class="metric-label">Managed Tabs</span>
+          <strong id="managedCount" class="metric-value">0</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Active Groups</span>
+          <strong id="activeWindows" class="metric-value">0</strong>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-label">Group Badge Color</div>
+        <div id="colorPalette" class="swatches" role="radiogroup" aria-label="Tab group color">
+          <button type="button" class="swatch swatch-purple" data-color="purple" title="Purple"></button>
+          <button type="button" class="swatch swatch-blue" data-color="blue" title="Blue"></button>
+          <button type="button" class="swatch swatch-cyan" data-color="cyan" title="Cyan"></button>
+          <button type="button" class="swatch swatch-green" data-color="green" title="Green"></button>
+          <button type="button" class="swatch swatch-orange" data-color="orange" title="Orange"></button>
+          <button type="button" class="swatch swatch-pink" data-color="pink" title="Pink"></button>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="selfTestBtn" type="button" class="btn btn-secondary">
+          Test Group Lifecycle (3s Demo)
+        </button>
+        <button id="sweepBtn" type="button" class="btn btn-danger">
+          Close Antigravity Group Now
+        </button>
+      </section>
+
+      <p id="feedbackMsg" class="feedback" aria-live="polite"></p>
+
+      <footer class="security-footer">
+        <span class="shield-dot"></span>
+        <span>Zero Host Permissions • Offline CSP • Local Only</span>
+      </footer>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

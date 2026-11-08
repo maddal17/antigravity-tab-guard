@@ -1,0 +1,33 @@
+name: CI & Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Manifest Zero-Trust Audit & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax verification
+        run: |
+          node --check src/constants.js
+          node --check src/group-controller.js
+          node --check src/background.js
+          node --check src/popup.js
+
+      - name: Run zero-trust security & lifecycle tests
+        run: npm test

@@ -1,0 +1,33 @@
+{
+  "name": "antigravity-tab-guard",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "author": "Alisher Makhmudov (@maddal17)",
+  "description": "Zero-trust Chrome MV3 extension that isolates AI agent debug tabs (Antigravity, chrome-devtools-mcp) into a dedicated Chrome Tab Group with deterministic teardown.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maddal17/antigravity-tab-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/maddal17/antigravity-tab-guard/issues"
+  },
+  "homepage": "https://github.com/maddal17/antigravity-tab-guard#readme",
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "antigravity",
+    "mcp",
+    "chrome-devtools-mcp",
+    "tab-groups",
+    "browser-automation",
+    "ai-agents",
+    "zero-trust"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

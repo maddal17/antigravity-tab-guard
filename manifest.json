@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Antigravity Tab Group Guard",
+  "short_name": "Antigravity",
+  "version": "1.0.0",
+  "description": "Zero-trust Chrome Tab Group isolation and deterministic cleanup for Antigravity automation sessions. Zero host permissions, zero network egress.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Antigravity Tab Group Guard",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none';"
+  }
+}
