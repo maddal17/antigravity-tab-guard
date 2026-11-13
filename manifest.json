@@ -2,14 +2,20 @@
   "manifest_version": 3,
   "name": "Antigravity Tab Group Guard",
   "short_name": "Antigravity",
-  "version": "1.0.0",
-  "description": "Zero-trust Chrome Tab Group isolation and deterministic cleanup for Antigravity automation sessions. Zero host permissions, zero network egress.",
+  "version": "2.0.0",
+  "description": "In-browser automation bridge & Chrome Tab Group isolation for Antigravity via Native Messaging and chrome.debugger. Zero network egress, zero modal prompts.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
     "tabGroups",
     "storage",
-    "alarms"
+    "alarms",
+    "debugger",
+    "scripting",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "src/background.js",

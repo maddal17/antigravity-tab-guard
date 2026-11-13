@@ -327,6 +327,15 @@ export class GroupController {
 
       // Path 2: Openerless tab — inspect birth URL
       const initialUrl = tab.pendingUrl || tab.url || '';
+      if (/^about:blank#antigravity-wake$/i.test(initialUrl)) {
+        try {
+          await this.chrome.tabs.remove(tabId);
+        } catch {
+          // Ignore
+        }
+        return;
+      }
+
       if (isBootstrapSignalUrl(initialUrl)) {
         disq.delete(tabId);
         state.disqualifiedTabIds = [...disq];
@@ -605,6 +614,126 @@ export class GroupController {
         activeWindows: Object.keys(state.windowGroups).length,
         prefs,
       };
+    });
+  }
+
+  async isManagedTab(tabId) {
+    if (tabId == null) return false;
+    return this.enqueue(async () => {
+      const state = await this._loadState();
+      await this._reconcileWithBrowser(state);
+      return Boolean(state.managedTabs[String(tabId)]);
+    });
+  }
+
+  async getManagedTabs() {
+    return this.enqueue(async () => {
+      const state = await this._loadState();
+      await this._reconcileWithBrowser(state);
+      await this._saveState(state);
+      const openTabs = await this.chrome.tabs.query({});
+      const tabById = new Map(openTabs.map((t) => [t.id, t]));
+      const result = [];
+      for (const [k, entry] of Object.entries(state.managedTabs)) {
+        const id = Number(k);
+        const live = tabById.get(id);
+        if (live) {
+          result.push({
+            tabId: id,
+            windowId: live.windowId ?? entry.windowId,
+            groupId: live.groupId ?? state.windowGroups[String(entry.windowId)] ?? TAB_GROUP_ID_NONE,
+            role: entry.role,
+            claimedAt: entry.claimedAt,
+            url: live.url || live.pendingUrl || '',
+            title: live.title || '',
+            active: Boolean(live.active),
+            status: live.status || 'complete',
+          });
+        }
+      }
+      return result;
+    });
+  }
+
+  async createManagedTab({ url = 'about:blank', active = false, windowId } = {}) {
+    return this.enqueue(async () => {
+      const state = await this._loadState();
+      await this._reconcileWithBrowser(state);
+
+      const createProps = {
+        url: 'about:blank#antigravity',
+        active: Boolean(active),
+      };
+      if (windowId != null) {
+        createProps.windowId = windowId;
+      }
+
+      const tab = await this.chrome.tabs.create(createProps);
+      if (!tab || tab.id == null) {
+        throw new Error('Failed to create Chrome tab');
+      }
+
+      const tabId = tab.id;
+      const key = String(tabId);
+      const disq = new Set(state.disqualifiedTabIds);
+      disq.delete(tabId);
+      state.disqualifiedTabIds = [...disq];
+      delete state.birthCandidates[key];
+
+      state.managedTabs[key] = {
+        windowId: tab.windowId,
+        role: 'root',
+        claimedAt: this.now(),
+        grouped: false,
+      };
+
+      const groupId = await this._ensureTabInAntigravityGroup(state, tabId, tab.windowId);
+      await this._saveState(state);
+
+      if (url && url !== 'about:blank' && !isBootstrapSignalUrl(url)) {
+        if (this.chrome.tabs.update) {
+          await this.chrome.tabs.update(tabId, { url, active: Boolean(active) });
+        }
+      }
+
+      return {
+        tabId,
+        windowId: tab.windowId,
+        groupId,
+        url,
+      };
+    });
+  }
+
+  async closeManagedTab(tabId) {
+    return this.enqueue(async () => {
+      const state = await this._loadState();
+      await this._reconcileWithBrowser(state);
+      const key = String(tabId);
+      const entry = state.managedTabs[key];
+      if (!entry) {
+        throw new Error(`Refusing to close unmanaged/user tab ${tabId}`);
+      }
+
+      const { windowId, role } = entry;
+      const toClose = [Number(tabId)];
+
+      if (role === 'root') {
+        const otherRoots = Object.entries(state.managedTabs).some(
+          ([k, e]) => Number(k) !== Number(tabId) && e.windowId === windowId && e.role === 'root'
+        );
+        if (!otherRoots) {
+          for (const [k, e] of Object.entries(state.managedTabs)) {
+            if (e.windowId === windowId && !toClose.includes(Number(k))) {
+              toClose.push(Number(k));
+            }
+          }
+        }
+      }
+
+      await this._ungroupAndRemoveTabsSafely(state, windowId, toClose);
+      await this._saveState(state);
+      return { closedTabIds: toClose };
     });
   }
 

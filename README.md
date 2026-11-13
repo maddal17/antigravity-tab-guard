@@ -1,92 +1,88 @@
-# Antigravity Tab Group Guard
+# Antigravity Tab Group Guard (`v2.0` — Native Messaging Bridge)
 
 [![CI & Security Audit](https://github.com/maddal17/antigravity-tab-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/maddal17/antigravity-tab-guard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-7C3AED.svg)](./LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-4F46E5.svg)](./manifest.json)
 
-Zero-trust Chrome Extension (Manifest V3) that isolates AI coding agent browser sessions (**Google Antigravity**, **`chrome-devtools-mcp`**, **Cursor**, **Claude Code**) into a dedicated, color-coded **"Antigravity"** Chrome Tab Group and performs deterministic cleanup upon task completion—without stealing focus, touching personal tabs, or leaving ghost Saved Tab Groups on your Bookmarks Bar.
+In-browser Chrome Extension (Manifest V3) and **Native Messaging Bridge** (modeled after the Claude Extension architecture) that drives **Google Antigravity** browser sessions inside a dedicated, color-coded **"Antigravity"** Chrome Tab Group—with **zero *"Allow remote debugging?"* modal prompts**, **zero network sockets**, **background screenshot capture**, and **deterministic teardown**.
 
 ---
 
-## Why This Exists
+## Why v2.0 Uses the Native Messaging Bridge (Claude Model)
 
-The **Chrome DevTools Protocol (CDP)** operates at Chromium's engine/target layer (`Target`, `Page`, `DOM`) and intentionally exposes **no API for Chrome UI Tab Groups** (`chrome.tabGroups` exists exclusively inside the Chrome Extensions layer). As a result, CDP-based agents scatter debug tabs across your active window or leave orphan targets behind.
+Connecting external tools (`chrome-devtools-mcp`, Puppeteer) to Chrome's external TCP port (`9222` / `DevToolsActivePort`) triggers Chrome's blocking modal security prompt (*"Allow remote debugging?"*) on every new connection.
 
-Existing agent browser extensions typically bridge this gap by opening localhost WebSocket servers, requesting `<all_urls>` host permissions, or injecting content scripts—introducing serious attack surfaces.
-
-**Antigravity Tab Group Guard** solves this with a **zero-network, zero-host-permission, out-of-band birth-URI handshake**.
+**Antigravity Tab Group Guard v2.0** eliminates external TCP debugging ports entirely:
+1. **OS Native Messaging Pipe (`com.antigravity.tab_guard`)**: Chrome spawns the local Native Host (`native-host/run-host.sh`) over standard I/O (`stdin`/`stdout`) and exposes a user-only (`0600`) Unix Domain Socket (`/tmp/antigravity-browser-bridge-<user>/bridge.sock`).
+2. **In-Browser Extension Debugger (`chrome.debugger`)**: The extension itself executes navigation, DOM snapshots, input dispatch, and Retina screenshot capture strictly on tabs inside the **"Antigravity"** Tab Group—with **zero modal prompts**.
+3. **Strict User-Tab Firewall**: Pre-existing personal and corporate tabs are permanently disqualified (`disqualifiedTabIds`). Any command targeting a non-managed tab is rejected at the extension boundary.
 
 ---
 
 ## Architecture
 
 ```
-[AI Agent / chrome-devtools-mcp]
+[Antigravity Agent / CLI (`ag-browser`) / MCP (`antigravity-browser`)]
        │
-       ├── 1. Bootstrap (Background): open new tab at `about:blank#antigravity`
-       │         └──► [Antigravity Tab Group Guard (MV3 Service Worker)]
-       │                 ├─ Verifies clean openerless birth (blocks webpage spoofing)
-       │                 ├─ Moves tab to right edge & groups under "Antigravity"
-       │                 └─ Auto-captures child popups opened by the session
+       │  1. Local Unix Domain Socket (`/tmp/antigravity-browser-bridge-<user>/bridge.sock`, mode 0600)
+       ▼
+[Native Messaging Host (`com.antigravity.tab_guard` -> `native-host/host.js`)]
        │
-       ├── 2. Execute: navigate to target URL, inspect DOM, capture screenshots
-       │         └──► (Dragging a tab out of the group transfers ownership to you)
+       │  2. Chrome Native Messaging Pipe (4-byte length-prefixed JSON, 512 KB chunked streaming)
+       ▼
+[Antigravity Tab Group Guard (MV3 Service Worker)]
        │
-       └── 3. Teardown: navigate to `about:blank#antigravity-done` & close tab
-                 └──► [Antigravity Tab Group Guard]
-                         ├─ Explicitly ungroups before close (zero Saved Tab Group residue)
-                         ├─ Cascade-closes any child popups
-                         └─ User tabs remain permanently locked & untouched
+       ├── Tab Group Isolation (`chrome.tabs` + `chrome.tabGroups`)
+       │     ├─ Opens tabs in background (`active: false`) at right edge (`index: -1`)
+       │     ├─ Groups session & child popups under purple "Antigravity" group (`collapsed: false`)
+       │     └─ Explicitly ungroups BEFORE closing on teardown (zero Saved Tab Groups ghost pills)
+       │
+       └── In-Browser Automation Engine (`chrome.debugger` + `chrome.scripting`)
+             ├─ Captures background screenshots via `Page.captureScreenshot`
+             ├─ Extracts DOM / Accessibility / Canvas snapshots
+             └─ Dispatches clicks, form fills, and keyboard shortcuts (`Shift+2`, `Meta+\`)
 ```
 
 ---
 
-## Security Design & Threat Model
+## Restraints & Mitigations
 
-Built after reviewing public vulnerabilities and failure modes across commercial and open-source browser agent extensions:
-
-| Threat / Failure Mode | Root Cause in Typical Extensions | Mitigation in `antigravity-tab-guard` |
+| Boundary / Failure Mode | Root Cause | Mitigation in `antigravity-tab-guard v2.0` |
 | :--- | :--- | :--- |
-| **Webpage Prompt/Command Injection** *(e.g. ShadowPrompt / ClaudeBleed)* | Wildcard `externally_connectable` origins, injected `content_scripts`, or trusting message origin over sender context. | **Zero `content_scripts`**, **zero `externally_connectable`**, **zero `web_accessible_resources`**, and strict internal sender verification. |
-| **Local Bridge Hijacking (SSRF / CSWSH)** | Listening on `ws://127.0.0.1:<port>` without mutual authentication. | **Zero network listeners** and browser-enforced offline CSP (`connect-src 'none'`). |
-| **The "Lethal Trifecta" (Data Exfiltration)** | Combining `<all_urls>`, `scripting`/`debugger`/`cookies`, and network access. | **Zero `host_permissions`**, no `scripting`/`debugger`/`cookies` permissions, and zero runtime npm dependencies. |
-| **MV3 Service Worker Idle Amnesia** | Storing managed tab IDs only in volatile JS memory wiped after 30s idle. | Serialized async mutex backed by `chrome.storage.session` surviving worker suspension and restarts. |
-| **Saved Tab Groups Ghost Clutter** | Calling `tabs.remove` directly causes Chrome Sync to archive closed groups onto the Bookmarks Bar. | Explicitly ungroups managed tabs right before removal so Chrome deletes the group cleanly. |
-| **Collapsed Group Screenshot Freezes** | Collapsing a Tab Group freezes Chromium's compositor/WebGL frame loop. | Keeps active group expanded (`collapsed: false`) at the right edge while opening tabs in background mode (`background: true`). |
+| **Modal Security Gate (`Allow remote debugging?`)** | External connections to TCP port `9222` / `DevToolsActivePort` require manual confirmation on every session. | **Zero external CDP port**. All automation runs inside the extension via `nativeMessaging` + `debugger` permissions. |
+| **Native Messaging 1 MB Limit** | Chrome disconnects `connectNative` ports if an extension sends >1 MB in a single `postMessage` (e.g. Retina PNG screenshots). | Automatic **512 KB chunked streaming** (`response_chunk`) reassembled by the Native Host and written directly to disk. |
+| **MV3 Service Worker 30s Idle Suspension** | Chrome suspends MV3 background workers after 30s of inactivity. | Native Host sends a 20s heartbeat (`keepalive_ping`) over stdio, plus `ag-browser` auto-wakes cold workers via `about:blank#antigravity-wake`. |
+| **Saved Tab Groups Ghost Clutter** | Calling `tabs.remove` directly causes Chrome Sync to archive closed groups onto the Bookmarks Bar. | Explicitly calls `tabs.ungroup` before `tabs.remove` on teardown. |
+| **Webpage / Localhost Attack Surface** | Opening localhost WebSocket servers or injecting `content_scripts` exposes SSRF / prompt injection vectors. | **Zero `content_scripts`**, **zero `externally_connectable`**, offline CSP (`connect-src 'none'`), and filesystem-permissioned (`0600`) Unix Domain Socket. |
 
 ---
 
-## Installation (30 Seconds)
+## CLI & MCP Usage (`ag-browser`)
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/maddal17/antigravity-tab-guard.git
-   ```
-2. Open Google Chrome and navigate to `chrome://extensions`.
-3. Enable **Developer mode** (top-right toggle).
-4. Click **Load unpacked** and select the cloned `antigravity-tab-guard` folder.
-5. *(Optional)* Click the **Antigravity Guard** toolbar icon and press **"Test Group Lifecycle (3s Demo)"** to see the purple **Antigravity** group appear and cleanly dissolve.
+```bash
+# Check Native Bridge & Extension status
+ag-browser status
 
----
+# Open URL inside the isolated purple "Antigravity" Tab Group (background mode)
+ag-browser open "https://example.com" --wait 1000
 
-## Agent Rule / Skill Snippet
+# Inspect structured DOM, interactive elements, and canvas dimensions
+ag-browser snapshot
 
-Add the following rule to your AI coding assistant (Google Antigravity `~/.gemini/config/rules/`, Cursor Rules, or `CLAUDE.md`) so every `chrome-devtools-mcp` / browser session uses the group automatically:
+# Capture Retina PNG screenshot directly to disk (without stealing focus)
+ag-browser screenshot /tmp/capture.png
 
-```markdown
-# Chrome Debug Mode Tab Group Policy
+# Dispatch keyboard shortcut (e.g. Figma zoom-to-fit) or click
+ag-browser key "Shift+2"
+ag-browser click "button.submit"
 
-Whenever opening Chrome tabs via browser automation / DevTools MCP:
-1. Never reuse, navigate, or close pre-existing user tabs.
-2. Open a new background tab (`background: true`) initialized at exact URI `about:blank#antigravity` first so the Antigravity Tab Group Guard extension isolates it inside the "Antigravity" Tab Group, then navigate that tab to the target URL.
-3. Upon completion, navigate the session tab to `about:blank#antigravity-done` right before closing the tab so child popups are swept and no Saved Tab Group ghost pill remains.
+# Deterministically ungroup and close all Antigravity tabs
+ag-browser teardown
 ```
 
 ---
 
 ## Running Tests
-
-Zero external dependencies required (uses Node.js built-in test runner, Node 20+):
 
 ```bash
 npm test

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GroupController } from '../src/group-controller.js';
+import { NativeBridge } from '../src/native-bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -167,20 +168,18 @@ function createChromeMock({ initialTabs = [] } = {}) {
   };
 }
 
-test('Security Audit: manifest.json & popup.html adhere to strict zero-trust boundaries', () => {
+test('Security Audit: manifest.json & popup.html adhere to strict Native Messaging + Offline CSP boundaries', () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(projectRoot, 'manifest.json'), 'utf8')
   );
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.host_permissions, undefined, 'Must declare ZERO host_permissions');
-  assert.equal(manifest.optional_host_permissions, undefined);
   assert.equal(manifest.content_scripts, undefined, 'Must declare ZERO content_scripts');
   assert.equal(manifest.externally_connectable, undefined, 'Must forbid external webpage/extension messaging');
   assert.equal(manifest.web_accessible_resources, undefined, 'Must forbid web fingerprinting');
 
-  const forbiddenPerms = ['debugger', 'scripting', 'cookies', 'webRequest', 'nativeMessaging', '<all_urls>'];
-  for (const perm of forbiddenPerms) {
-    assert.ok(!manifest.permissions.includes(perm), `Forbidden permission present: ${perm}`);
+  const requiredPerms = ['tabs', 'tabGroups', 'storage', 'alarms', 'debugger', 'scripting', 'nativeMessaging'];
+  for (const perm of requiredPerms) {
+    assert.ok(manifest.permissions.includes(perm), `Required permission missing: ${perm}`);
   }
 
   const csp = manifest.content_security_policy?.extension_pages || '';
@@ -192,6 +191,78 @@ test('Security Audit: manifest.json & popup.html adhere to strict zero-trust bou
   const popupHtml = fs.readFileSync(path.join(projectRoot, 'src/popup.html'), 'utf8');
   assert.ok(!/\son\w+\s*=/i.test(popupHtml), 'Popup HTML must not use inline event handlers');
   assert.ok(!/\sstyle\s*=/i.test(popupHtml), 'Popup HTML must not use inline styles');
+});
+
+test('NativeBridge: opens managed tabs in Antigravity group, captures screenshots via chrome.debugger, and blocks touching user tabs', async () => {
+  const mock = createChromeMock({
+    initialTabs: [{ id: 4, windowId: 1, url: 'https://bank.internal/' }],
+  });
+
+  // Add tabs.get, tabs.update, and debugger mock
+  mock.chromeApi.tabs.get = async (tabId) => {
+    const t = mock.tabs.get(tabId);
+    if (!t) throw new Error('Tab not found');
+    return { ...t, status: 'complete', title: 'Mock Page' };
+  };
+  mock.chromeApi.tabs.update = async (tabId, props) => {
+    const t = mock.tabs.get(tabId);
+    if (!t) throw new Error('Tab not found');
+    Object.assign(t, props);
+    return { ...t };
+  };
+  mock.chromeApi.debugger = {
+    onDetach: { addListener() {} },
+    async attach({ tabId }) {
+      mock.callLog.push({ op: 'debugger.attach', tabId });
+    },
+    async detach({ tabId }) {
+      mock.callLog.push({ op: 'debugger.detach', tabId });
+    },
+    async sendCommand({ tabId }, method) {
+      mock.callLog.push({ op: 'debugger.sendCommand', tabId, method });
+      if (method === 'Page.captureScreenshot') {
+        return { data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' };
+      }
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: { ok: true }, type: 'object' } };
+      }
+      return {};
+    },
+  };
+
+  const controller = new GroupController({ chromeApi: mock.chromeApi });
+  await controller.initialize();
+  const bridge = new NativeBridge({ controller, chromeApi: mock.chromeApi });
+
+  // 1. Refuse to navigate or debug pre-existing user tab #4
+  await assert.rejects(
+    () => bridge.executeCommand('NAVIGATE', { tabId: 4, url: 'https://evil.example/' }),
+    /Security Policy Violation/
+  );
+  await assert.rejects(
+    () => bridge.executeCommand('SCREENSHOT', { tabId: 4 }),
+    /Security Policy Violation/
+  );
+
+  // 2. Open managed tab via NativeBridge
+  const opened = await bridge.executeCommand('OPEN_TAB', {
+    url: 'https://www.figma.com/design/abc/test',
+    active: false,
+  });
+  assert.ok(opened.tabId >= 100);
+  assert.equal(mock.groups.size, 1, 'Antigravity Tab Group created');
+
+  // 3. Capture screenshot via internal chrome.debugger and verify clean detach
+  const shot = await bridge.executeCommand('SCREENSHOT', { tabId: opened.tabId });
+  assert.ok(shot.base64Data.length > 10);
+  assert.ok(mock.callLog.some((c) => c.op === 'debugger.attach' && c.tabId === opened.tabId));
+  assert.ok(mock.callLog.some((c) => c.op === 'debugger.detach' && c.tabId === opened.tabId));
+
+  // 4. Deterministic teardown ungroups before closing
+  const closed = await bridge.executeCommand('TEARDOWN');
+  assert.equal(closed.closedCount, 1);
+  assert.equal(mock.tabs.has(opened.tabId), false);
+  assert.equal(mock.tabs.has(4), true, 'User tab #4 remains untouched');
 });
 
 test('Standard CDP Lifecycle: encapsulates bootstrap tab into Antigravity group and ungroups before closing', async () => {

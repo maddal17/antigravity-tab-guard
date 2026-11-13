@@ -4,6 +4,9 @@
 
 export const GROUP_TITLE = 'Antigravity';
 export const DEFAULT_GROUP_COLOR = 'purple';
+export const NATIVE_HOST_NAME = 'com.antigravity.tab_guard';
+export const NATIVE_RECONNECT_ALARM = 'ag_native_reconnect_alarm';
+export const NATIVE_CHUNK_SIZE = 512 * 1024; // 512 KB chunks (safely under Chrome's 1 MB Native Messaging limit)
 
 export const ALLOWED_GROUP_COLORS = Object.freeze([
   'grey',
