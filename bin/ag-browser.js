@@ -437,7 +437,11 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isMain =
+  process.argv[1] &&
+  import.meta.url === `file://${fs.realpathSync(process.argv[1])}`;
+
+if (isMain) {
   main().catch((err) => {
     console.error(JSON.stringify({ ok: false, error: err.message }, null, 2));
     process.exit(1);

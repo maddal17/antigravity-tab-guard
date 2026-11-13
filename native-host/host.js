@@ -262,6 +262,10 @@ export function startNativeHost() {
   process.on('SIGINT', shutdown);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isMain =
+  process.argv[1] &&
+  import.meta.url === `file://${fs.realpathSync(process.argv[1])}`;
+
+if (isMain) {
   startNativeHost();
 }
